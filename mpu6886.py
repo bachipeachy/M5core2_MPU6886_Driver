@@ -3,6 +3,7 @@ The MIT License (MIT)
 
 Copyright (c) 2022 bachipeachy@gmail.com
 inspired by work done by Mika Tuupola at https://github.com/tuupola/micropython-mpu6886
+based on MPU6886 user guide ..
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -65,24 +66,28 @@ class MPU6886:
         """ initialize and save avg stationary 6-axis sensor readings and tolerance """
 
         self.i2c = i2c
-        self._imuparms = {'address': 0x68, 'accel_fs': MPU6886.FS_2G, 'accel_div': 16384, 'gyro_fs': MPU6886.FS_250DPS,
-                          'gyro_div': 131, 'SG': 9.800665, 'RAD': 0.017453292519943, 'debug': False}
+        self._imuparms = {'address': 0x68, 'accel_fs': MPU6886.FS_2G, 'gyro_fs': MPU6886.FS_250DPS,
+                          'SG': 9.800665, 'debug': False}
 
         [self.imuparms.update({k: v}) for k, v in kwargs.items()]
 
-        if self.imuparms['accel_fs'] == MPU6886.FS_4G:
-            self.imuparms['accel_div'] = 8192
+        if self.imuparms['accel_fs'] == MPU6886.FS_2G:
+            self.imuparms['accel_dial'] = 2 * self.imuparms['SG']
+        elif self.imuparms['accel_fs'] == MPU6886.FS_4G:
+            self.imuparms['accel_dial'] = 4 * self.imuparms['SG']
         elif self.imuparms['accel_fs'] == MPU6886.FS_8G:
-            self.imuparms['accel_div'] = 4096
+            self.imuparms['accel_dial'] = 8 * self.imuparms['SG']
         elif self.imuparms['accel_fs'] == MPU6886.FS_16G:
-            self.imuparms['accel_div'] = 2048
+            self.imuparms['accel_dial'] = 16 * self.imuparms['SG']
 
-        if self.imuparms['gyro_fs'] == MPU6886.FS_500DPS:
-            self.imuparms['gyro_div'] = 65.5
+        if self.imuparms['gyro_fs'] == MPU6886.FS_250DPS:
+            self.imuparms['gyro_dial'] = 250
+        elif self.imuparms['gyro_fs'] == MPU6886.FS_500DPS:
+            self.imuparms['gyro_dial'] = 500
         elif self.imuparms['gyro_fs'] == MPU6886.FS_1000DPS:
-            self.imuparms['gyro_div'] = 32.8
+            self.imuparms['gyro_dial'] = 10000
         elif self.imuparms['gyro_fs'] == MPU6886.FS_2000DPS:
-            self.imuparms['gyro_div'] = 16.4
+            self.imuparms['gyro_dial'] = 20000
 
         # validate existence of IMU
         if self.reg(MPU6886.WHO_AM_I) != b'\x19':
@@ -137,30 +142,32 @@ class MPU6886:
 
         temp = self.reg(MPU6886.TEMP_OUT_H, nbytes=2)[0]
         temp = (temp / MPU6886.TEMP_SO) + MPU6886.TEMP_OFFSET
-        temp = (1.8 * temp) + 32
+        temp = round(((1.8 * temp) + 32), 1)
         print("* imu temperature deg F -> ", temp)
         return temp
 
     @property
     def acceleration(self):
-        """ returns tuple of X, Y, Z axis acceleration values in m/s^2 as floats """
+        """ returns tuple of X, Y, Z axis acceleration values in m/s^2 as float """
 
         xyz = self.reg(MPU6886.ACCEL_XOUT_H, nbytes=6)
-        accl = tuple([(value / self.imuparms['accel_div']) * self.imuparms['SG'] for value in xyz])
+        accl = tuple([self.imuparms['accel_dial'] * val / 32768 for val in xyz])
+        accl = [round(a, 1) for a in accl]
         if self.imuparms['debug']:
-            print("    accl: ", accl)
+            print("    accl -> {}".format(accl))
         return accl
 
     @property
     def gyro(self):
-        """ returns tuple of X, Y, Z axis gyro values in radians per second as floats. """
+        """ returns tuple of X, Y, Z axis gyro values in deg/sec as int. """
 
         xyz = self.reg(MPU6886.GYRO_XOUT_H, nbytes=6)
 
-        gyro = [(value / self.imuparms['gyro_div']) * self.imuparms['RAD'] for value in xyz]
+        gyro = tuple([int(self.imuparms['gyro_dial'] * val / 32768) for val in xyz])
         if self.imuparms['debug']:
-            print("    gyro: ", tuple(gyro))
-        return tuple(gyro)
+            print("    gyro -> {}".format(gyro))
+
+        return gyro
 
     def avg(self, sensor, delay=10, count=10):
         """ return average value for specified count of scans """
@@ -175,6 +182,7 @@ class MPU6886:
             count -= 1
             utime.sleep_ms(delay)
         val = (xt / n, yt / n, zt / n)
+        val = [round(v, 1) for v in val]
         if self.imuparms['debug']:
             print("* avg_{} -> {}".format(sensor, val))
         return val
@@ -182,23 +190,35 @@ class MPU6886:
     def avg_tolerance(self, sensor, pause=1000, delay=10, count=10):
         """ static/stationary sensor readings and measured avg pct tolerance or variation in readings """
 
+        dial = None
+        uom = None
+        if sensor == 'acceleration':
+            dial = self.imuparms['accel_dial']
+            uom = 'm/s/s'
+        elif sensor == 'gyro':
+            dial = self.imuparms['gyro_dial']
+            uom = 'deg/s'
+        print("* {} dial -> {} {}".format(sensor, dial, uom))
+
         avg = []
         avg1 = self.avg(sensor, delay=delay, count=count)
         utime.sleep_ms(pause)
         avg2 = self.avg(sensor, delay=delay, count=count)
         tolerance = (tuple(abs(x - y) for x, y in zip(avg1, avg2)))
         [avg.append((x + y) / 2) for x, y in zip(avg1, avg2)]
-        pct = [100 * t / abs(x) for t, x in zip(tolerance, tuple(avg))]
+        avg = [round(a, 1) for a in avg]
+        pct = [100 * t / dial for t, a in zip(tolerance, tuple(avg))]
+        pct = [round(p, 1) for p in pct]
         print(
-            "* {} readings every {} msec interval, with {} msec pause between two '{} sample' averages  ..\n  avg -> {}\n  tolerance_pct -> {}"
-            .format(sensor, delay, pause, count, tuple(avg), tuple(pct)))
+            "* {} readings every {} msec interval, with {} msec pause between two '{} sample' averages  ..\n"
+            "  avg -> {}\n  tolerance_pct -> {}".format(sensor, delay, pause, count, tuple(avg), tuple(pct)))
         return tuple(avg), tuple(pct)
 
     def selftest(self, sensor='acceleration', axis='z'):
         """ return self test response as avg difference in sensor readings with self test enabled and disabled """
 
-        mask = [m for m in ('ST_X', 'ST_Y', 'ST_Z') if m == 'ST_' + axis.upper()][0]
-        mask = getattr(MPU6886, mask)
+        sta = [m for m in ('ST_X', 'ST_Y', 'ST_Z') if m == 'ST_' + axis.upper()][0]
+        mask = getattr(MPU6886, sta)
 
         retval = None
         if sensor == 'acceleration':
@@ -213,5 +233,8 @@ class MPU6886:
             self.reg(MPU6886.GYRO_CONFIG, self.imuparms['gyro_fs'])
         else:
             print("* error got {} but expecting 'acceleration' or 'gyro'".format(sensor))
-        print("* {} selftest response val {}".format(sensor, retval))
+
+        retval = [round(r, 1) for r in retval]
+        print("* selftest response -> {} {} axis delta variation {} in full dial UOM".format(sensor, sta, retval))
         return retval
+
