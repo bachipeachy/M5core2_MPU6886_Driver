@@ -44,25 +44,14 @@ When the device is stationary, the sensor output will have residual values close
 Returns a tuple of angular velocity type float for x, y and z axes in DPS (deg/sec)
 When the device is stationary, the sensor output will have residual values close to zeros in all three directions.
 
-### Method avg()
-Returns averaged readings of the specified sensor='acceleration or 'gyro' for specified count of scans with specified number of msec delay between each successive reads.
+### Method _ft()
+Returns the results of factory run self test permamnetly stored in the registers. This reference data is compared against on-demand user perfomed self test to ensure integrity of the sensors
 
-### Method avg_tolerance()
-Returns a two 3-element (x, y & z) tuple. The first value being 'avg' reading and the second one being 'tolerance' 
+### Method _st()
+Returns self test response difference in readings with self test enabled and disabled
 
-The method performs two sets of scans (with several readings) delayed by default pause=1000 msec.
-
-Each scan involves a default count=10 readings, sucecssive reads delayed by default delay=10 msec.
-The two averages are averaged again as final avg in first return value.
-
-The 'pct_tolerance' i.e., the second return value is average difference between corresponding elements of the tuple (e.g. x val) obtained from the two sets of averages, expressed as pct of full scale (dial) value.
-In ideal situation the tolerance_pct will be (0, 0, 0). This computed measurement is used to judge if there is a significant change in two sucecssive readings. You may call 'tolerance' as insigificant change that can be ignored as statistical error, drift or change.
-
-### Method selftest()
-The IMU allows running a self test which simulates synthetic linear and angular motion during which measurements are made. The method allows you to choose sensor type, axis of interest and other params described in avg_tolerance() method.
-
-Returns self test response as avg difference in sensor readings with self test enabled and disabled. This should be within tolerance -- hopefully!
-
-The purpose of this test is to ensure the sensor is not damaged over its life span.
+### Method selftest_experimental()
+The IMU has a self test feature that simulates synthetic linear and angular motion during which measurements are made. This is experimental, under testing for proper interpretaion of user guide info
+The purpose of this test is to ensure the sensor is healthy
 
 
