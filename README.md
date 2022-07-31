@@ -45,13 +45,13 @@ Returns a tuple of angular velocity type float for x, y and z axes in DPS (deg/s
 When the device is stationary, the sensor output will have residual values close to zeros in all three directions.
 
 ### Method _ft()
-Returns the results of factory run self test permamnetly stored in the registers. This reference data is compared against on-demand user perfomed self test to ensure integrity of the sensors
+Returns the results of factory run self test permanently stored in the registers. This reference data is compared against on-demand user perfomed self test to ensure integrity of the sensors.
 
 ### Method _st()
 Returns self test response difference in readings with self test enabled and disabled
 
 ### Method selftest_experimental()
-The IMU has a self test feature that simulates synthetic linear and angular motion during which measurements are made. This is experimental, under testing for proper interpretaion of user guide info
-The purpose of this test is to ensure the sensor is healthy
+The IMU self test simulates synthetic linear and angular motion during which measurements are made. This is experimental, under testing for proper interpretation of user guide info.
+The purpose of this test is to ensure the sensor is healthy.
 
 
