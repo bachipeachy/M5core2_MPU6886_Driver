@@ -49,7 +49,12 @@ class MPU6886:
     SELF_TEST_Z_GYRO = const(82)
     PWR_MGMT_1 = const(107)
     WHO_AM_I = const(117)
-
+    
+    # in use register mask
+    DEVICE_RESET = b'\x80'
+    GYRO_STANDBY = b'\x10'
+    CLKSEL = b'\x01'
+    
     # GYRO_CONFIG register masks
     FS_250DPS = b'\x00'
     FS_500DPS = b'\x08'
@@ -66,7 +71,6 @@ class MPU6886:
     ST_X = b'\x80'
     ST_Y = b'\x40'
     ST_Z = b'\x20'
-    ST_XYZ = b'\xe0'
 
     # temperature constants
     TEMP_OFFSET = 25
@@ -108,25 +112,30 @@ class MPU6886:
             if self.imuparms['debug']:
                 print("* IMU id verified")
 
-        # reset MPU6886 -- write b'\x10' to PWR_MGMT_1
-        self.reg(MPU6886.PWR_MGMT_1, b'\x10')
-        if self.imuparms['debug']:
-            print("* IMU reset")
+        # clear PWR_MGMT_1 resgister
+        self.reg(MPU6886.PWR_MGMT_1, b'\x00')
 
-        # autoselect MPU6886 clock -- write b'\x01' to PWR_MGMT_1
+        # Gyro low power mode standby
         utime.sleep_ms(10)
-        self.reg(MPU6886.PWR_MGMT_1, b'\x01')
-        if self.imuparms['debug']:
-            print("* IMU autoselect clock")
+        self.reg(MPU6886.PWR_MGMT_1, MPU6886.GYRO_STANDBY)
 
+        # auto select clock
+        utime.sleep_ms(10)
+        self.reg(MPU6886.PWR_MGMT_1, MPU6886.CLKSEL)
+                
+        # set accel full scale 2000 mG
+        utime.sleep_ms(10)
         self.reg(MPU6886.ACCEL_CONFIG, self.imuparms['accel_fs'])
         if self.imuparms['debug']:
-            print("* Set acceleration dial@ {} mg".format(self.imuparms['accel_dial']))
-
+            print("* Set acceleration dial@ {} mG".format(self.imuparms['accel_dial']))
+        
+        # set gyr0 full scale 250 dps/s
+        utime.sleep_ms(10)
         self.reg(MPU6886.GYRO_CONFIG, self.imuparms['gyro_fs'])
         if self.imuparms['debug']:
             print("* Set gyro dial@ {} dps/s".format(self.imuparms['gyro_dial']))
-
+        
+        # save factoy trim for self test
         self.imuparms['accel_ft'] = self._ft(sensor='accel')
         self.imuparms['gyro_ft'] = self._ft(sensor='gyro')
 
@@ -146,6 +155,7 @@ class MPU6886:
 
         if val is not None:
             self.i2c.writeto_mem(self.imuparms['address'], r, val)
+        utime.sleep_ms(1)
         byt = self.i2c.readfrom_mem(self.imuparms['address'], r, nbytes)
         if nbytes == 6:
             byt = ustruct.unpack(">hhh", byt)
@@ -172,7 +182,7 @@ class MPU6886:
         xyz = self.reg(MPU6886.ACCEL_XOUT_H, nbytes=6)
         result = tuple([int(self.imuparms['accel_dial'] * val / 32768) for val in xyz])
         if self.imuparms['debug']:
-            print("  accl -> {} @fs = {} mg".format(result, self.imuparms['accel_dial']))
+            print("  accl -> {} @fs = {} mG".format(result, self.imuparms['accel_dial']))
         return result
 
     @property
@@ -199,15 +209,19 @@ class MPU6886:
         tuple([trim.append(int(dial * int.from_bytes(v, sys.byteorder) / 32768))
                for v in [self.reg(r) for r in xyz]])
 
-        print("* {} factory trims x, y, z -> {} {}".format(sensor, trim, 'mg' if sensor == 'accel' else 'dps'))
+        print("* IMU {} factory trims x, y, z -> {} {}".format(sensor, trim, 'mG' if sensor == 'accel' else 'dps'))
         return trim
 
     def _st(self, sensor):
         """ return self test response 'res' -> difference in readings with self test enabled and disabled """
 
         r = getattr(MPU6886, sensor.upper() + '_CONFIG')
-        self.reg(r, MPU6886.ST_XYZ)
-        enabled = getattr(self, sensor)
+
+        enabled = []
+        for i, mask in enumerate((MPU6886.ST_X, MPU6886.ST_Y, MPU6886.ST_Z)):
+            self.reg(r, mask)
+            utime.sleep_ms(10)
+            enabled.append(getattr(self, sensor)[i])
 
         fs = None
         if sensor == 'accel':
@@ -218,13 +232,13 @@ class MPU6886:
         utime.sleep_ms(10)
         disabled = getattr(self, sensor)
 
-        res = tuple(x - y for x, y in zip(enabled, disabled))
+        st_r = tuple(x - y for x, y in zip(enabled, disabled))
         self.reg(r, self.imuparms[sensor + '_fs'])
 
-        print("* {} self test response x, y, z -> {} {}".format(
-            sensor, res, 'mg' if sensor == 'accel' else 'dps'))
+        print("* {} self test response x, y, z -> {} {}\n  should be less than factory trim values -> {}".format(
+            sensor, st_r, 'mG' if sensor == 'accel' else 'dps', self.imuparms[sensor + '_ft']))
 
-        return res
+        return st_r
 
     def selftest_experimental(self, sensor='accel', tolerance=None):
         """ compares self test response with factory trim for equality within specified allowable tolerance """
@@ -247,8 +261,10 @@ class MPU6886:
             ft = self.imuparms[sensor + '_ft']
             [result.update({i: "passed"}) for i, (x, y) in enumerate(zip(st, ft)) if x <= y]
             result = tuple(result.values())
-            print("* {} selftest x, y, z -> {}\n  factory trim -> {} {} with a tolerance of {}".format(
-                sensor, result, ft, 'mg' if sensor == 'accel' else 'dps', tolerance))
+            print("* {} selftest x, y, z -> {}, allowable tolerance of 2*{} {}".format(
+                sensor, result, tolerance, 'mG' if sensor == 'accel' else 'dps'))
             return result
         else:
-            print("* {} test x, y, z passed -- response within {} mg tolerance".format(sensor, tolerance))
+            print("* {} test passed\n"
+                  "  the max self test response of {} is within allowable tolerance of 2*{}"
+                  .format(sensor, max(st), tolerance))

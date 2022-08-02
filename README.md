@@ -54,4 +54,10 @@ Returns self test response difference in readings with self test enabled and dis
 The IMU self test simulates synthetic linear and angular motion during which measurements are made. This is experimental, under testing for proper interpretation of user guide info.
 The purpose of this test is to ensure the sensor is healthy.
 
+#### Note
+The gyro selftest yields correct results. However, in the accel selftest, the self test respose value is exhibiting a fairly fixed bias of roughly 450 mG in all three axes. Somemore testing is needed to validate the results. This is still in work.
+The article (link below) for a comparable hardware has nice explanation on self test of Inertial Measuring Units.
+
+https://www.edn.com/the-embedded-self-test-feature-in-mems-inertial-sensors/
+
 
